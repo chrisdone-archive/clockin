@@ -89,7 +89,7 @@ clockIn config project task =
   do now <- getCurrentTime
      clock config (In (ClockIn project task now))
 
--- | Clock outto somethoutg.
+-- | Clock out of something.
 clockOut :: Config    -- ^ Config.
         -> Text       -- ^ Project.
         -> Maybe Text -- ^ Task.
