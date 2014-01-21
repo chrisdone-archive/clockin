@@ -15,7 +15,9 @@ library
   hs-source-dirs:    src/
   ghc-options:       -Wall -O2
   exposed-modules:   Clockin
-  build-depends:     resourcet >= 0.4.9,
+  build-depends:     http-conduit >= 2.0.0.0,
+                     safe >= 0.3.0,
+                     resourcet >= 0.4.9,
                      aeson >= 0.6.2.0,
                      bytestring >= 0.10.0.0,
                      conduit >= 1.0.9.0,

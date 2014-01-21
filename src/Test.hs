@@ -5,11 +5,10 @@
 module Main where
 
 import Clockin
-
 import Data.Maybe
 import Data.Monoid
-import Data.Time.Clock
 import Data.Time.Format
+import Data.Time.LocalTime
 import System.Exit
 import System.Locale
 
@@ -32,7 +31,7 @@ main =
         matches times n e = if r == e then Right () else Left (times,e,r,c)
           where c = formatTime defaultTimeLocale "%F %R" (now' n)
                 r = inToday (now' n) (reverse times)
-        now' :: String -> UTCTime
+        now' :: String -> LocalTime
         now' n = (fromJust . parseTime defaultTimeLocale "%F%R" . (today<>)) n
         i n =
           In (ClockIn "Some project"

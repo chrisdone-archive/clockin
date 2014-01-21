@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -48,7 +49,7 @@ instance FromJSON Entry
 data ClockIn = ClockIn
   { inProject :: !Text
   , inTask    :: !(Maybe Text)
-  , inTime    :: !UTCTime
+  , inTime    :: !Time
   } deriving (Show,Generic)
 
 instance ToJSON ClockIn
@@ -60,7 +61,7 @@ data ClockOut = ClockOut
   { outProject :: !Text
   , outTask    :: !(Maybe Text)
   , outReason  :: !(Maybe Text)
-  , outTime    :: !UTCTime
+  , outTime    :: !Time
   } deriving (Show,Generic)
 
 instance ToJSON ClockOut
@@ -88,8 +89,8 @@ clockIn :: Config     -- ^ Config.
         -> Maybe Text -- ^ Task.
         -> IO ()
 clockIn config project task =
-  do now <- getCurrentTime
-     clock config (In (ClockIn project task now))
+  do now <- getLocalTime
+     clock config (In (ClockIn project task (Time now)))
 
 -- | Clock out of something.
 clockOut :: Config    -- ^ Config.
@@ -98,8 +99,8 @@ clockOut :: Config    -- ^ Config.
         -> Maybe Text -- ^ Reason.
         -> IO ()
 clockOut config project task reason =
-  do now <- getCurrentTime
-     clock config (Out (ClockOut project task reason now))
+  do now <- getLocalTime
+     clock config (Out (ClockOut project task reason (Time now)))
 
 -- | Clock in or out.
 clock :: Config -> Entry -> IO ()
@@ -111,14 +112,14 @@ clock config entry =
 printClockinStatus :: Config -> IO ()
 printClockinStatus config =
   do entries <- readClockinEntries config
-     now <- getZonedTime
-     T.putStrLn (describeStatus now (clockinStatus config (zonedTimeToUTC now) entries))
+     now <- getLocalTime
+     T.putStrLn (describeStatus now (clockinStatus config now entries) entries)
 
 -- | Print hours worked per day in a format spark can consume.
 printSparkDays :: Config -> IO ()
 printSparkDays config =
   do entries <- readClockinEntries config
-     now <- getCurrentTime
+     now <- getLocalTime
      forM_ (days now entries)
            (\day ->
               let diff =
@@ -126,7 +127,7 @@ printSparkDays config =
                             (clockinStatus config
                                            day
                                            (filter ((<=day).entryTime) entries)))
-              in putStrLn (show (utctDay day) ++ " " ++ T.unpack (hoursIn day diff)))
+              in putStrLn (formatTime defaultTimeLocale "%F" day ++ " " ++ T.unpack (hoursIn day diff)))
   where days now =
           nub . map (min now . modL seconds (subtract 1) . modL day (+1) . startOfDay . entryTime)
 
@@ -139,29 +140,39 @@ readClockinEntries config =
                 CL.consume)
 
 -- | Make a human-readable representation of the status.
-describeStatus :: ZonedTime -> Status -> Text
-describeStatus now status =
-  T.unlines ["Current time is: " <> T.pack (formatTime defaultTimeLocale "%F %R" now)
-            ,"Currently clocked " <> (if statusIn status
-                                         then "IN "
-                                         else "OUT ")
-                                  <> (if statusCurTimePeriod status == 0 && not (statusIn status)
-                                         then ""
-                                         else "(" <>
-                                              diffTime (-1 * (statusCurTimePeriod status)) True <>
-                                              ")")
-            ,"Time spent today: " <> hoursIn utc (-1 * (statusInToday status))
-            ,"Remaining: " <> hoursIn utc (statusRemainingToday status)
-            ]
-  where utc = zonedTimeToUTC now
+describeStatus :: LocalTime -> Status -> [Entry] -> Text
+describeStatus now status entries =
+  T.intercalate
+    "\n"
+    ["Current time is: " <> T.pack (formatTime defaultTimeLocale "%F %R" now)
+    ,"Currently clocked " <> (if statusIn status
+                                 then "IN "
+                                 else "OUT ")
+                          <> (if statusCurTimePeriod status == 0 && not (statusIn status)
+                                 then ""
+                                 else "(" <>
+                                      diffTime (-1 * (statusCurTimePeriod status)) True <>
+                                      ")")
+    ,"Time spent today: " <> hoursIn now (-1 * (statusInToday status))
+    ,"Remaining: " <> hoursIn now (statusRemainingToday status)
+    ,"Log today:\n" <> T.intercalate "\n" (map describeEntry
+                                               (filter ((>startOfDay now).entryTime) entries))
+    ,if statusIn status then T.pack (formatTime defaultTimeLocale "%R (now)" now) else ""
+    ]
 
-hoursIn :: UTCTime -> NominalDiffTime -> Text
+-- | Describe an entry.
+describeEntry :: Entry -> Text
+describeEntry (In (ClockIn _ _ t)) = T.pack (formatTime defaultTimeLocale "%R" t) <> " in"
+describeEntry (Out (ClockOut _ _ _ t)) = T.pack (formatTime defaultTimeLocale "%R" t) <> " out"
+
+-- | Show the number of hours in (or out, really).
+hoursIn :: LocalTime -> NominalDiffTime -> Text
 hoursIn now = T.pack .
               formatTime defaultTimeLocale "%R" .
-              (`addUTCTime` startOfDay now)
+              (`addLocalTime` startOfDay now)
 
 -- | Make a short human-readable representation of the status, on one line.
-onelinerStatus :: UTCTime -> Status -> Text
+onelinerStatus :: LocalTime -> Status -> Text
 onelinerStatus now status =
   "Worked/remaining: " <>
   hours (-1 * (statusInToday status)) <>
@@ -172,19 +183,19 @@ onelinerStatus now status =
   ")"
   where hours = T.pack .
                 formatTime defaultTimeLocale "%R" .
-                (`addUTCTime` startOfDay now)
+                (`addLocalTime` startOfDay now)
 
 -- | Generate a status report of the current log.
-clockinStatus :: Config -> UTCTime -> [Entry] -> Status
+clockinStatus :: Config -> LocalTime -> [Entry] -> Status
 clockinStatus config now entries =
   Status clockedIn
          curPeriod
          todayDiff
          remaining
   where remaining =
-          diffUTCTime (addUTCTime (60 * 60 * fromIntegral (configHoursPerDay config))
+          diffLocalTime (addLocalTime (60 * 60 * fromIntegral (configHoursPerDay config))
                                   midnight)
-                      (addUTCTime (-1 * todayDiff)
+                      (addLocalTime (-1 * todayDiff)
                                   midnight)
         todayDiff = inToday now descending
         clockedIn =
@@ -193,21 +204,19 @@ clockinStatus config now entries =
                                    In{} -> True
                                    _ -> False)
                           current)
-        curPeriod = maybe 0 (diffUTCTime now . entryTime) current
+        curPeriod = maybe 0 (diffLocalTime now . entryTime) current
         current = listToMaybe descending
         descending = reverse entries
         midnight = startOfDay now
 
 -- | Get the time, if any, of an entry's clocking in.
-entryTime :: Entry -> UTCTime
-entryTime (In i) = inTime i
-entryTime (Out o) = outTime o
+entryTime :: Entry -> LocalTime
+entryTime (In i) = timeLocalTime (inTime i)
+entryTime (Out o) = timeLocalTime (outTime o)
 
 -- | Get the starting time of the day of the given time.
-startOfDay :: UTCTime -> UTCTime
-startOfDay time =
-  case time of
-    UTCTime day _ -> UTCTime day 0
+startOfDay :: LocalTime -> LocalTime
+startOfDay (LocalTime day _) = LocalTime day midnight
 
 -- | How much time clocked in today? Expects a DESCENDING entry list.
 --
@@ -216,17 +225,17 @@ startOfDay time =
 -- midnight.
 --
 -- Stops traversing the list if it reaches an entry from yesterday.
-inToday :: UTCTime -> [Entry] -> NominalDiffTime
+inToday :: LocalTime -> [Entry] -> NominalDiffTime
 inToday now = go now 0 . zip [0::Int ..]
   where go last total (((i,x):xs)) =
           case x of
-            In{} | today -> go this (total + diffUTCTime this last) xs
-                 | otherwise -> go this (total + diffUTCTime (startOfDay now) last) []
+            In{} | today -> go this (total + diffLocalTime this last) xs
+                 | otherwise -> go this (total + diffLocalTime (startOfDay now) last) []
             Out{} | today -> go this total xs
                   | i == 0 -> go this total []
                   | otherwise -> go this total []
           where this = entryTime x
-                today = utctDay this == utctDay now
+                today = localDay this == localDay now
         go _ total _ = total
 
 -- | Display a time span as one time relative to another.
@@ -260,3 +269,34 @@ diffTime span' fix = T.pack $ maybe "unknown" format $ find (\(s,_,_) -> abs spa
            ,(year,"a year",0)
            ,(year*2,"%d years",year)
            ]
+
+-- Local time operations
+
+getLocalTime :: IO LocalTime
+getLocalTime = fmap zonedTimeToLocalTime getZonedTime
+
+diffLocalTime :: LocalTime -> LocalTime -> NominalDiffTime
+diffLocalTime t1 t2 = diffUTCTime (localTimeToUTC utc t1)
+                                  (localTimeToUTC utc t2)
+
+addLocalTime :: NominalDiffTime -> LocalTime -> LocalTime
+addLocalTime d = tmap (addUTCTime d)
+
+tmap :: (UTCTime -> UTCTime) -> LocalTime -> LocalTime
+tmap f = utcToLocalTime utc . f . localTimeToUTC utc
+
+-- | A local time. The only reason for this is to avoid the orphan instance.
+newtype Time = Time
+  { timeLocalTime :: LocalTime }
+  deriving (Show,ParseTime,FormatTime,Generic)
+
+instance ToJSON Time where
+  toJSON =
+    toJSON . formatTime defaultTimeLocale "%F %T"
+
+instance FromJSON Time where
+  parseJSON s =
+    do s <- parseJSON s
+       case parseTime defaultTimeLocale "%F %T" s of
+         Nothing -> fail "Couldn't parse local time."
+         Just t -> return t
