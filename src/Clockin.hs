@@ -197,50 +197,17 @@ startOfDay time =
 --
 -- Stops traversing the list if it reaches an entry from yesterday.
 inToday :: UTCTime -> [Entry] -> NominalDiffTime
-inToday now = go now 0
-  where go last total (x:xs) =
+inToday now = go now 0 . zip [0..]
+  where go last total (((i,x):xs)) =
           case x of
             In{} | today -> go this (total + diffUTCTime this last) xs
                  | otherwise -> go this (total + diffUTCTime (startOfDay now) last) []
             Out{} | today -> go this total xs
+                  | i == 0 -> go this total []
                   | otherwise -> go this total []
           where this = entryTime x
                 today = utctDay this == utctDay now
         go _ total _ = total
-
--- | Test that the 'inToday' function works properly.
-test :: IO ()
-test = either (\(ts,expected,actual,cur) ->
-                 do mapM_ (putStrLn . asEntry) ts
-                    putStrLn ("Current time: " <> cur)
-                    putStrLn ("Expected: " <> show expected)
-                    putStrLn ("Actual: " <> show actual))
-              (const (putStrLn "OK"))
-              (sequence [matches [o "10:00",i' "23:00",o "02:00"] "04:00" 2.0
-                        ,matches [i "00:00",o "02:00",i "03:00",o "04:00"] "05:00" 3.0
-                        ,matches [i "00:00",o "02:00",i "03:00"] "05:00" 4.0])
-  where asEntry (In i) = "i " <> formatTime defaultTimeLocale "%F %R" (inTime i)
-        asEntry (Out o) = "o " <> formatTime defaultTimeLocale "%F %R" (outTime o)
-        matches times n e = if r == e then Right () else Left (times,e,r,c)
-          where c = formatTime defaultTimeLocale "%F %R" (now' n)
-                r = inToday (now' n) (reverse times)
-        now' :: String -> UTCTime
-        now' n = (fromJust . parseTime defaultTimeLocale "%F%R" . (today<>)) n
-        i n =
-          In (ClockIn "Some project"
-                      Nothing
-                      ((fromJust . parseTime defaultTimeLocale "%F%R" . (today<>)) n))
-        i' n =
-          In (ClockIn "Some project"
-                      Nothing
-                      ((fromJust . parseTime defaultTimeLocale "%F%R" . (yesterday<>)) n))
-        o n =
-          Out (ClockOut "Some project"
-                        Nothing
-                        Nothing
-                        ((fromJust . parseTime defaultTimeLocale "%F%R" . (today<>)) n))
-        today = "2014-01-20"
-        yesterday = "2014-01-19"
 
 -- | Display a time span as one time relative to another.
 diffTime :: NominalDiffTime
