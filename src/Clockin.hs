@@ -1,11 +1,13 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS -fno-warn-name-shadowing #-}
 
 -- | Track clocking in and out of work.
 
 module Clockin where
 
+import           Control.Monad
 import           Control.Monad.Trans.Resource
 import           Data.Aeson
 import qualified Data.ByteString.Lazy as L
@@ -112,6 +114,22 @@ printClockinStatus config =
      now <- getZonedTime
      T.putStrLn (describeStatus now (clockinStatus config (zonedTimeToUTC now) entries))
 
+-- | Print hours worked per day in a format spark can consume.
+printSparkDays :: Config -> IO ()
+printSparkDays config =
+  do entries <- readClockinEntries config
+     now <- getCurrentTime
+     forM_ (days now entries)
+           (\day ->
+              let diff =
+                    -1 * (statusInToday
+                            (clockinStatus config
+                                           day
+                                           (filter ((<=day).entryTime) entries)))
+              in putStrLn (show (utctDay day) ++ " " ++ T.unpack (hoursIn day diff)))
+  where days now =
+          nub . map (min now . modL seconds (subtract 1) . modL day (+1) . startOfDay . entryTime)
+
 -- | Read in the log entries from file.
 readClockinEntries :: Config -> IO [Entry]
 readClockinEntries config =
@@ -132,15 +150,18 @@ describeStatus now status =
                                          else "(" <>
                                               diffTime (-1 * (statusCurTimePeriod status)) True <>
                                               ")")
-            ,"Time spent today: " <> hours (-1 * (statusInToday status))
-            ,"Remaining: " <> hours (statusRemainingToday status)
+            ,"Time spent today: " <> hoursIn utc (-1 * (statusInToday status))
+            ,"Remaining: " <> hoursIn utc (statusRemainingToday status)
             ]
-  where hours = T.pack .
-                formatTime defaultTimeLocale "%R" .
-                (`addUTCTime` startOfDay (zonedTimeToUTC now))
+  where utc = zonedTimeToUTC now
+
+hoursIn :: UTCTime -> NominalDiffTime -> Text
+hoursIn now = T.pack .
+              formatTime defaultTimeLocale "%R" .
+              (`addUTCTime` startOfDay now)
 
 -- | Make a short human-readable representation of the status, on one line.
-onelinerStatus :: ZonedTime -> Status -> Text
+onelinerStatus :: UTCTime -> Status -> Text
 onelinerStatus now status =
   "Worked/remaining: " <>
   hours (-1 * (statusInToday status)) <>
@@ -151,7 +172,7 @@ onelinerStatus now status =
   ")"
   where hours = T.pack .
                 formatTime defaultTimeLocale "%R" .
-                (`addUTCTime` startOfDay (zonedTimeToUTC now))
+                (`addUTCTime` startOfDay now)
 
 -- | Generate a status report of the current log.
 clockinStatus :: Config -> UTCTime -> [Entry] -> Status
@@ -165,7 +186,6 @@ clockinStatus config now entries =
                                   midnight)
                       (addUTCTime (-1 * todayDiff)
                                   midnight)
-        tomorrow = modL day (+1) now
         todayDiff = inToday now descending
         clockedIn =
           fromMaybe False
@@ -197,7 +217,7 @@ startOfDay time =
 --
 -- Stops traversing the list if it reaches an entry from yesterday.
 inToday :: UTCTime -> [Entry] -> NominalDiffTime
-inToday now = go now 0 . zip [0..]
+inToday now = go now 0 . zip [0::Int ..]
   where go last total (((i,x):xs)) =
           case x of
             In{} | today -> go this (total + diffUTCTime this last) xs
