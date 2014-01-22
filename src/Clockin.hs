@@ -73,8 +73,14 @@ data Status = Status
   { statusIn             :: !Bool            -- ^ Am I clocked in?
   , statusCurTimePeriod  :: !NominalDiffTime -- ^ How long have I been clocked in/clocked out for?
   , statusInToday        :: !NominalDiffTime -- ^ How long have I been in today?
-  , statusRemainingToday :: !NominalDiffTime -- ^ How long left today?
+  , statusRemainingToday :: !Remaining        -- ^ How long left today?
   } deriving (Show)
+
+-- | How much time remaining.
+data Remaining
+  = Credit NominalDiffTime
+  | Due NominalDiffTime
+    deriving (Eq,Show)
 
 -- | Get a default config.
 getClockinConfig :: IO Config
@@ -154,7 +160,7 @@ describeStatus now status entries =
                                       diffTime (-1 * (statusCurTimePeriod status)) True <>
                                       ")")
     ,"Time spent today: " <> hoursIn now (-1 * (statusInToday status))
-    ,"Remaining: " <> hoursIn now (statusRemainingToday status)
+    ,"Remaining: " <> hoursRemaining now (statusRemainingToday status)
     ,"Log today:\n" <> T.intercalate "\n" (map describeEntry
                                                (filter ((>startOfDay now).entryTime) entries))
     ,if statusIn status then T.pack (formatTime defaultTimeLocale "%R (now)" now) else ""
@@ -164,6 +170,10 @@ describeStatus now status entries =
 describeEntry :: Entry -> Text
 describeEntry (In (ClockIn _ _ t)) = T.pack (formatTime defaultTimeLocale "%R" t) <> " in"
 describeEntry (Out (ClockOut _ _ _ t)) = T.pack (formatTime defaultTimeLocale "%R" t) <> " out"
+
+-- | Hours remaining.
+hoursRemaining now (Due h) = hoursIn now h
+hoursRemaining now (Credit h) = "-" <> hoursIn now h
 
 -- | Show the number of hours in (or out, really).
 hoursIn :: LocalTime -> NominalDiffTime -> Text
@@ -175,15 +185,12 @@ hoursIn now = T.pack .
 onelinerStatus :: LocalTime -> Status -> Text
 onelinerStatus now status =
   "Worked/remaining: " <>
-  hours (-1 * (statusInToday status)) <>
+  hoursIn now (-1 * (statusInToday status)) <>
   "/" <>
-  hours (statusRemainingToday status) <>
+  hoursRemaining now (statusRemainingToday status) <>
   " (clocked " <>
   (if statusIn status then "in" else "out") <>
   ")"
-  where hours = T.pack .
-                formatTime defaultTimeLocale "%R" .
-                (`addLocalTime` startOfDay now)
 
 -- | Generate a status report of the current log.
 clockinStatus :: Config -> LocalTime -> [Entry] -> Status
@@ -192,11 +199,18 @@ clockinStatus config now entries =
          curPeriod
          todayDiff
          remaining
-  where remaining =
-          diffLocalTime (addLocalTime (60 * 60 * fromIntegral (configHoursPerDay config))
-                                  midnight)
-                      (addLocalTime (-1 * todayDiff)
-                                  midnight)
+  where remaining
+          | -1 * todayDiff < goalDiff =
+            Due (diffLocalTime (addLocalTime goalDiff
+                                             midnight)
+                               (addLocalTime (-1 * todayDiff)
+                                           midnight))
+          | otherwise =
+            Credit (diffLocalTime (addLocalTime (-1 * todayDiff)
+                                              midnight)
+                                  (addLocalTime goalDiff
+                                                midnight))
+        goalDiff = (60 * 60 * fromIntegral (configHoursPerDay config))
         todayDiff = inToday now descending
         clockedIn =
           fromMaybe False
@@ -213,6 +227,11 @@ clockinStatus config now entries =
 entryTime :: Entry -> LocalTime
 entryTime (In i) = timeLocalTime (inTime i)
 entryTime (Out o) = timeLocalTime (outTime o)
+
+-- | Get the project of the entry.
+entryProject :: Entry -> Text
+entryProject (In i) = inProject i
+entryProject (Out o) = outProject o
 
 -- | Get the starting time of the day of the given time.
 startOfDay :: LocalTime -> LocalTime

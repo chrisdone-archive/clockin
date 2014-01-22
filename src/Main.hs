@@ -6,7 +6,7 @@ module Main where
 
 import Clockin
 import Data.Maybe
-import Data.Text
+import Data.Text (pack)
 import System.Environment
 
 -- | Main entry point.
@@ -24,4 +24,12 @@ main = do
                       Nothing
     "status" -> printClockinStatus config
     "days" -> printSparkDays config
+    "toggle" -> do entries <- readClockinEntries config
+                   case reverse entries of
+                     (entry:_) ->
+                       do now <- getLocalTime
+                          if statusIn (clockinStatus config now entries)
+                             then clockOut config (entryProject entry) Nothing Nothing
+                             else clockIn config (entryProject entry) Nothing
+                     _ -> error "No previous project to clock in/out of"
     _ -> error "clockin <in/out> <project> [task] or clockin <status/spark-days>"
