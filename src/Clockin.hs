@@ -73,7 +73,7 @@ data Status = Status
   { statusIn             :: !Bool            -- ^ Am I clocked in?
   , statusCurTimePeriod  :: !NominalDiffTime -- ^ How long have I been clocked in/clocked out for?
   , statusInToday        :: !NominalDiffTime -- ^ How long have I been in today?
-  , statusRemainingToday :: !Remaining        -- ^ How long left today?
+  , statusRemainingToday :: !Remaining       -- ^ How long left today?
   } deriving (Show)
 
 -- | How much time remaining.
