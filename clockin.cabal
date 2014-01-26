@@ -1,5 +1,5 @@
 name:                clockin
-version:             0.0.0
+version:             0.1.0
 synopsis:            Track clocking in and out of work.
 description:         Track clocking in and out of work.
 license:             BSD3
