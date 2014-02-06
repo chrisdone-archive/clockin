@@ -184,11 +184,10 @@ hoursIn now = T.pack .
 -- | Make a short human-readable representation of the status, on one line.
 onelinerStatus :: LocalTime -> Status -> Text
 onelinerStatus now status =
-  "Worked/remaining: " <>
   hoursIn now (-1 * (statusInToday status)) <>
   "/" <>
   hoursRemaining now (statusRemainingToday status) <>
-  " (clocked " <>
+  " (" <>
   (if statusIn status then "in" else "out") <>
   ")"
 
