@@ -137,6 +137,38 @@ printSparkDays config =
   where days now =
           nub . map (min now . modL seconds (subtract 1) . modL day (+1) . startOfDay . entryTime)
 
+-- | Print minutes.
+printMinutes :: Config -> IO ()
+printMinutes config =
+  do entries <- readClockinEntries config
+     now <- getLocalTime
+     forM_ (days now entries)
+           (\day ->
+              let diff =
+                    -1 * (statusInToday
+                            (clockinStatus config
+                                           day
+                                           (filter ((<=day).entryTime) entries)))
+              in putStrLn (formatTime defaultTimeLocale "%F" day ++ "\t" ++ show (minutesIn day diff)))
+  where days now =
+          nub . map (min now . modL seconds (subtract 1) . modL day (+1) . startOfDay . entryTime)
+
+-- | Print hours.
+printHours :: Config -> IO ()
+printHours config =
+  do entries <- readClockinEntries config
+     now <- getLocalTime
+     forM_ (days now entries)
+           (\day ->
+              let diff =
+                    -1 * (statusInToday
+                            (clockinStatus config
+                                           day
+                                           (filter ((<=day).entryTime) entries)))
+              in putStrLn (formatTime defaultTimeLocale "%F" day ++ "\t" ++ show (hoursCountIn day diff)))
+  where days now =
+          nub . map (min now . modL seconds (subtract 1) . modL day (+1) . startOfDay . entryTime)
+
 -- | Read in the log entries from file.
 readClockinEntries :: Config -> IO [Entry]
 readClockinEntries config =
@@ -177,9 +209,22 @@ hoursRemaining now (Credit h) = "-" <> hoursIn now h
 
 -- | Show the number of hours in (or out, really).
 hoursIn :: LocalTime -> NominalDiffTime -> Text
-hoursIn now = T.pack .
-              formatTime defaultTimeLocale "%R" .
-              (`addLocalTime` startOfDay now)
+hoursIn now =
+  T.pack .
+  formatTime defaultTimeLocale "%R" .
+  (`addLocalTime` startOfDay now)
+
+-- | Show the number of minutes in (or out, really).
+minutesIn :: LocalTime -> NominalDiffTime -> Int
+minutesIn now =
+  getL minutes .
+  (`addLocalTime` startOfDay now)
+
+-- | Show the number of hours in (or out, really).
+hoursCountIn :: LocalTime -> NominalDiffTime -> Int
+hoursCountIn now =
+  getL hours .
+  (`addLocalTime` startOfDay now)
 
 -- | Make a short human-readable representation of the status, on one line.
 onelinerStatus :: LocalTime -> Status -> Text

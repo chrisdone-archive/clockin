@@ -24,6 +24,8 @@ main = do
                       Nothing
     "status" -> printClockinStatus config
     "days" -> printSparkDays config
+    "minutes" -> printMinutes config
+    "hours" -> printHours config
     "toggle" -> do entries <- readClockinEntries config
                    case reverse entries of
                      (entry:_) ->
