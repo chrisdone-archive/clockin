@@ -26,7 +26,7 @@ import           Data.Time.Lens
 import           GHC.Generics
 import           System.Directory
 import           System.FilePath
-import           System.Locale
+import           Data.Time.Locale.Compat
 import           Text.Printf
 
 -- | Configuration for the clocking in setup.
